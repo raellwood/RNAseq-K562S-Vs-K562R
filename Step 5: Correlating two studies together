@@ -1,0 +1,82 @@
+#How to merge two datasets together and compare them using a Pearsons correlation
+
+#Merge the two files by symbol (gene name) in R
+#Input the first dataset and make it into an object. Also as the gene name had different headers this was changed so that it matched the other one
+input_file <- file.choose()
+Mine <- read.delim(input_file, sep = ",")
+renamed_mine <- rename(Mine, "hgnc_symbol" = "symbol")
+
+#Input the second file 
+input_file <- file.choose()
+BRC <- read.delim(input_file, sep = ",")
+
+#Merge the two files together by symbol
+merged <- merge.data.frame(BRC, renamed_mine, by = "symbol", all.x = T, all.y = T)
+
+#Set working directory 
+setwd("/work/rae216/Comparison")
+
+#Write the output as a file
+write.csv(merged, "merged.spreadsheet.csv", row.names = F, quote = F) 
+
+#Filtering to remove NAs and any with a difference in foldchange of greater than 1 
+# load data
+my_data <- read.csv("merged.spreadsheet2.csv")[,c(1:5)]
+
+# filter nas
+na_idx <- apply(my_data, 1, function(x) any(is.na(x)))
+na_data <- my_data[na_idx,]
+clean_data <- my_data[!na_idx,]
+
+# remove > 2 fold diff
+diff_idx <- abs(clean_data$log2FoldChange.BRC - clean_data$log2FoldChange.mine) > 1
+fc_data <- clean_data[diff_idx,]
+clean_data <- clean_data[!diff_idx,]
+
+# write tables
+write.table(clean_data, "clean_data.csv", sep = ",")
+write.table(fc_data, "removed_foldchange.csv", sep=",")
+write.table(na_data, "removed_na.csv", sep=",")
+
+
+#Perform a pearsons correlation
+
+#Insert merged spreadsheet into R
+MergedData <- read.csv(file="merged.spreadsheet.csv", header=TRUE, sep=",")[,c(1:5)]
+
+#Check MergedData
+head (MergedData)
+
+#Pearsons correlation is a parametric measure of the linear assocaition between 2 numeric variables
+#Comparing padj (pearson)
+mine = MergedData$padj.mine
+BRC = MergedData$padj.BRC
+cor(mine, BRC)
+#[1] 0.3774269
+
+
+
+#Comparing logfoldchange (pearson)
+mine2 = MergedData$log2FoldChange.mine
+BRC2 = MergedData$log2FoldChange.BRC
+cor(mine2, BRC2)
+# [1] 0.9621698
+
+
+#Testing the hypothesis that the correlation is not equal to 0 using pearsons padj
+cor.test(mine, BRC, method="pearson")
+
+#Creating plots for padj and log2FoldChange
+library(ggplot2)
+Merged <- read.csv("clean_data.csv", header=TRUE, sep=",")
+head (Merged)
+names(Merged) <- c("X", "symbol", "log2FoldChange.BRC", "log2FoldChange.mine", "padj.BRC", "padj.mine")
+head (names(Merged))
+scatter_plot <- ggplot(Merged, aes(log2FoldChange.BRC, log2FoldChange.mine))
+scatter_plot + geom_point() + labs (x = "TopHat2 & HTSeq (log2FoldChange)", y = "Salmon (log2FoldChange)")
+scatter_plot + geom_point() + labs (x = "TopHat2 & HTSeq (log2FoldChange)", y = "Salmon (log2FoldChange)") + geom_smooth(method="lm")
+dev.off()
+scatter_plot <- ggplot(Merged, aes(padj.BRC, padj.mine))
+scatter_plot + geom_point() + labs (x = "TopHat2 & HTSeq (padj)", y = "Salmon (padj)")
+scatter_plot + geom_point() + labs (x = "TopHat2 & HTSeq (padj)", y = "Salmon (padj)") + geom_smooth(method="lm")
+dev.off()
