@@ -1,0 +1,148 @@
+#This file demonstrates how to transform the data and produce different plots based on the data e.g. PCA, sample-to-sample distance heatmaps and normal heatmaps
+
+#In R:
+#Download packagages and libraries if needed 
+source("http://bioconductor.org/biocLite.R")
+biocLite("DESeq2")
+biocLite("tximportData")
+biocLite("pheatmap")
+biocLite("hexbin")
+biocLite("biomaRt")
+
+#Load libraries
+library("DESeq2")
+library("tximportData")
+library("ggplots2")
+library("gplots")
+library("RColorBrewer")
+library("vsn")
+library("pheatmap")
+library("hexbin")
+library("biomaRt")
+
+#Transforming the data to remove heteroskedasticity and finding the best transformation
+#Regularised logarithm
+rld <- rlog(dds)
+#Variance stabilising transform (vst)
+vsd <- varianceStabilizingTransformation (dds)
+#A simple log2 of the counts to compare with
+nt <- normTransform (dds)
+
+#We plot the variance as a function of the mean, first using our counts with a simple log2, and then after each transformation
+pdf(paste(dir,'variancePlots.pdf', sep='/'))
+par(mfrow=c(1,3))
+
+#Take only the genes whose expression is not 0 in all the samples
+notAllZero <- (rowSums(counts (dds))>0)
+
+#Plot the log2 normalised counts
+meanSdPlot(assay(nt[notAllZero,]))
+
+#Plot the regularised log transformed counts
+meanSdPlot(assay(rld[notAllZero,]))
+
+#Plot the variance transformed counts and close and save the file
+meanSdPlot(assay(vsd[notAllZero,]))
+dev.off()
+#Select the transformation that is best for your data, it will be the one with the most consistent gradient. For this data it is vst. vst is used for the rest of the analysis
+
+#Creating a PCA plot
+plotPCA(vsd,intgroup=c(‘Condition’))
+dev.off()
+
+#Creating a heatmap for the top 30 variable genes
+library ("genefilter")
+topVarGenes <- head(order(rowVars(assay(vsd)), decreasing = TRUE), 30)
+mat  <- assay(vsd)[ topVarGenes, ]
+mat  <- mat - rowMeans(mat)
+mart <- useMart("ensembl", "hsapiens_gene_ensembl")
+gns <- getBM(c("hgnc_symbol","ensembl_gene_id"), "ensembl_gene_id", row.names(mat), mart)
+row.names(mat)[match(gns[,2], row.names(mat))] <- gns[,1]
+pheatmap(mat)
+dev.off()
+
+#Plotting a heatmap of the distance between different samples
+colors <- colorRampPalette(brewer.pal(9,'Blues'))(255)
+sampleDists <- dist(t(assay(vsd)))
+sampleDistMatrix <- as.matrix(sampleDists)
+rownames(sampleDistMatrix) <-vsd$Condition
+colnames(sampleDistMatrix) <-NULL
+pheatmap(sampleDistMatrix,clustering_distance_rows=sampleDists,clustering_distance_cols=sampleDists,col=colors)
+dev.off()
+
+#Gene enrichment analysis upregulated genes. As my res file contained NA values the programme could not recognise it, I therefore changed all of the NAs to 1 for padj and pvalue and for log2foldchange to 0
+res$padj[is.na(res$padj)]<-1
+res$pvalue[is.na(res$pvalue)]<-1
+res$log2FoldChange[is.na(res$log2FoldChange)]<-0
+
+#Upregulated genes with a log2FoldChange of >0 and a padj of <0.01
+res_up0 <- res[res$log2FoldChange>0,]
+signThreshold <-0.01
+res_up_sign<-res_up0[res_up0$padj<signThreshold,]
+
+#Reorder based on padj
+res_up_sign<-res_up_sign[order(res_up_sign$padj),]
+
+#Write it out in a file
+write.table(res_up_sign,sep='\t',quote=FALSE,file=paste(out,'signUp0',sep=""))
+
+#Read in the file and call it data then add a column like before to add the gene names
+#Go to normal terminal and add a header to the file called ensembl
+data=read.table("DESeq2signUp2",header=T)
+ensembl= useMart( "ensembl", dataset = "hsapiens_gene_ensembl")
+genemap<- getBM( attributes = c("ensembl_gene_id", "entrezgene", "hgnc_symbol"),filters = "ensembl_gene_id",values = data$ensembl,mart = ensembl)
+idx <- match( data$ensembl, genemap$ensembl_gene_id )
+data$entrez <- genemap$entrezgene[ idx ]
+data$hgnc_symbol<- genemap$hgnc_symbol[ idx ]
+newdata <- data[order(data$padj),]
+write.table(newdata,file="logfoldchange0andpvalue0.05.csv",quote=FALSE,sep=",",row.names=FALSE)
+
+#downregulated genes with a log2FoldChange of <0 and a padj of <0.01
+res_down0 <- res[res$log2FoldChange<0,]
+signThreshold <-0.01
+res_down_sign<-res_down0[res_down0$padj<signThreshold,]
+
+#Reorder based on padj
+res_down_sign<-res_down_sign[order(res_down_sign$padj),]
+
+#Write it out in a file
+write.table(res_down_sign,sep='\t',quote=FALSE,file=paste(out,'signdown0',sep=""))
+
+#Read in the file and call it data then add a column like before to add the gene names
+#Go to normal terminal and add a header to the file called ensembl
+data=read.table("DESeq2signdown0",header=T)
+ensembl= useMart( "ensembl", dataset = "hsapiens_gene_ensembl")
+genemap<- getBM( attributes = c("ensembl_gene_id", "entrezgene", "hgnc_symbol"),filters = "ensembl_gene_id",values = data$ensembl,mart = ensembl)
+idx <- match( data$ensembl, genemap$ensembl_gene_id )
+data$entrez <- genemap$entrezgene[ idx ]
+data$hgnc_symbol<- genemap$hgnc_symbol[ idx ]
+newdata <- data[order(data$padj),]
+write.table(newdata,file="downreglogfoldchange0andpvalue0.05.csv",quote=FALSE,sep=",",row.names=FALSE)
+
+#Creating a heatmap from a chosen list of genes
+#In Linux, create a list file with the names of the genes you wish to produce a heatmap from, give it the header gene
+nano shRNAgenes.list
+
+#In R:
+human= useMart( "ensembl", dataset = "hsapiens_gene_ensembl")
+x<-getBM( filters= "ensembl_gene_id", attributes= c("ensembl_gene_id","hgnc_symbol"), values= res$ensembl, mart= ensembl,uniqueRows = TRUE)
+colnames(x)<-c("gene","hgnc_symbol")
+alldata=assay(vsd)
+alldata<-data.frame("gene"=rownames(alldata),alldata)
+alldata<-merge(x,alldata,by="gene")
+alldata<-alldata[!duplicated(alldata[,'hgnc_symbol']),]
+nm <- alldata$hgnc_symbol
+GOI<-read.table("shRNAgenes.list", header=TRUE, stringsAsFactors=FALSE)
+select<-c(GOI)
+selectedRows <- nm %in% select$Genes
+z<-subset(alldata, selectedRows)
+rownames(z)<-z$hgnc_symbol
+z=(z[3:8])
+q<-data.matrix(z)
+colors = colorRampPalette(brewer.pal(8, "RdBu"))(100)
+hclust2 <- function(x, method="average", ...)
+  hclust(x, method=method, ...)
+dist2 <- function(x, ...)
+  as.dist(1-cor(t(x), method="pearson"))
+heatmap.2(q,scale="row", col = rev(colors), distfun=dist2,hclustfun=hclust2, key=TRUE, symkey=FALSE,density.info="none", trace="none", cexRow=0.70,cexCol=0.70,,Colv=F,dendrogram = c("row"))
+dev.off()
