@@ -1,0 +1,51 @@
+#Gene level counts were created from the transcript level counts obtained from Salmon using TXimport 
+
+#Load R
+module load R
+R
+
+#Load libraries
+library ("tximport")
+library ("readr")
+
+#Tell R the location of the directory
+dir <- ("/work/rae216/salmon_out")
+
+# In Linux, create a file called Sample.tsv with the sample names
+for i in K*; do echo “$i” >> Sample.tsv
+#Edit the document so that you can include conditions, batches etc each one should be separated by a tab
+nano Sample.tsv
+
+# In R, create a file called samples that contains the data from Sample.tsv
+samples<-read.table("/work/rae216/salmon_out/Sample.tsv", header=T,quote="",sep="\t")
+
+#Check what is in samples
+samples
+
+#Create a file called sampleNames with the names of the samples
+sampleNames=samples$Code 
+#In this case Code is the header for the names of my sample in Sample.tsv, change this to whatever your header is 
+
+#Check what is in sampleNames
+sampleNames
+
+#Create a file called files which lists the quant.sf files
+files<-file.path(dir, sampleNames, "quant.sf")
+
+#Check what is in the file files
+files
+
+#Create a file called names to name the paths from the previous
+names(files)<-paste0("samples", 1:6)
+
+#Check what is in names
+names
+
+#Create a file with ensembl ids for genes and transcripts. In my case it was called tx2gene.csv and this is to be read into R
+tx2gene <- read.csv(file.path(dir, "tx2gene.csv"),sep="\t",header=T)
+
+#Check what is in the file tx2gene
+head(tx2gene)
+
+#Run tximport
+txi<- tximport (files, type="salmon", tx2gene=tx2gene, reader=read_tsv)
