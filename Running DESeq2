@@ -1,0 +1,78 @@
+#DESeq2 was used to determine which genes were differentially expressed between K562S and K562R
+
+#On Linux create a txt file called sample.txt with the sample names, conditions, batches etc
+nano sample.txt
+
+#Put this information into a file called coldata in R
+coldata<-read.table("/work/rae216/salmon_out/sample.txt", header=T,quote="",sep="\t")
+
+#Check coldata
+coldata
+
+#Give names to the rows that match our quantifications
+rownames(coldata) <- colnames (txi$counts)
+
+#Check coldata again
+coldata
+
+#Download the following packages from biocLite
+source("http://bioconductor.org/biocLite.R")
+biocLite("DESeq2")
+biocLite("tximportData")
+biocLite("pheatmap")
+biocLite("hexbin")
+biocLite("biomaRt")
+
+#Load libraries
+library("DESeq2")
+library("tximportData")
+library("ggplots2")
+library("gplots")
+library("RColorBrewer")
+library("vsn")
+library("pheatmap")
+library("hexbin")
+library("biomaRt")
+
+#Create a DEseqDataSet object to be used for the differential expression
+ddstxi <- DESeqDataSetFromTximport (txi,colData=coldata, design=~Condition)
+
+#Define an output path and name
+out <- file.path(dir, "DESeq2")
+
+#Run DEseq2
+dds<-DESeq(ddstxi)
+
+#Adjust the p value for 0.01
+alpha <- 0.01
+
+#Save the normalised counts
+normCounts<-counts(dds,normalized=TRUE)
+write.csv(as.data.frame(normCounts), file=paste(out,"_normalisedGeneCounts,csv,sep=""))
+
+#Get the results
+res<-results(dds)
+
+#Get a summary of the results
+sum(res$padj < alpha, na.rm=TRUE)
+
+#Order the values based on the adjusted p value
+resOrdered <- res[order(res$padj),] 
+write.csv(as.data.frame(resOrdered), file=paste(out,"results.csv",sep=""))
+
+#To add the gene names based on the ensemble ids
+#Go to the results file in Linux and add a header called ensembl to the ensembl ids and read the file into R
+res<-read.table("DESeq2results.csv",header=T, sep=",")
+
+#Run biomaRt to add the gene names
+ensembl= useMart( "ensembl", dataset = "hsapiens_gene_ensembl")
+genemap<- getBM( attributes = c("ensembl_gene_id", "entrezgene", "hgnc_symbol"),filters = "ensembl_gene_id",values = res$ensembl,mart = ensembl)
+idx <- match( res$ensembl, genemap$ensembl_gene_id )
+res$entrez <- genemap$entrezgene[ idx ]
+res$hgnc_symbol<- genemap$hgnc_symbol[ idx ]
+newdata <- res[order(res$padj),]
+write.table(newdata,file="Genes.csv",quote=FALSE,sep=",",row.names=FALSE)
+
+#Make an MA plot
+plotMA(res, ylim=c(-2,2))
+dev.off()
